@@ -123,7 +123,7 @@ check_base(const char *tableList, const char *input, const char *expected,
 			// Hm, something is not quite right. Try again with a larger outbuf
 			free(outbuf);
 			int old_outlen = inputLength * outlen_multiplier * k;
-			int new_outlen = inputLength * outlen_multiplier * (k+1);
+			int new_outlen = inputLength * outlen_multiplier * (k + 1);
 			outbuf = malloc(sizeof(widechar) * new_outlen);
 			fprintf(stderr,
 					"Warning: For %s: inputLength (%d) differs from actualLength (%d) "
