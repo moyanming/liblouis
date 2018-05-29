@@ -67,8 +67,10 @@ int
 check_base(const char *tableList, const char *input, const char *expected,
 		optional_test_params in) {
 	widechar *inbuf, *outbuf, *expectedbuf;
-	int inlen = strlen(input);
-	int outlen = inlen * 10;
+	int inputLength = strlen(input);
+	int actualLength = inputLength;
+	const int outlen_multiplier = 4 + sizeof(widechar) * 2;
+	int outlen = inputLength * outlen_multiplier;
 	int expectedlen = strlen(expected);
 	int i, retval = 0;
 	int funcStatus = 0;
@@ -77,7 +79,7 @@ check_base(const char *tableList, const char *input, const char *expected,
 	int *outputPos = NULL;
 	int cursorPos = 0;
 
-	inbuf = malloc(sizeof(widechar) * inlen);
+	inbuf = malloc(sizeof(widechar) * inputLength);
 	outbuf = malloc(sizeof(widechar) * outlen);
 	expectedbuf = malloc(sizeof(widechar) * expectedlen);
 	if (in.typeform != NULL) {
@@ -90,8 +92,8 @@ check_base(const char *tableList, const char *input, const char *expected,
 	if (in.max_outlen >= 0) {
 		outlen = in.max_outlen;
 	}
-	inlen = _lou_extParseChars(input, inbuf);
-	if (!inlen) {
+	inputLength = _lou_extParseChars(input, inbuf);
+	if (!inputLength) {
 		fprintf(stderr, "Cannot parse input string.\n");
 		retval = 1;
 		goto fail;
@@ -100,21 +102,36 @@ check_base(const char *tableList, const char *input, const char *expected,
 		inputPos = malloc(sizeof(int) * outlen);
 	}
 	if (in.expected_outputPos) {
-		outputPos = malloc(sizeof(int) * inlen);
+		outputPos = malloc(sizeof(int) * inputLength);
 	}
-	if (in.direction == 0) {
-		funcStatus = lou_translate(tableList, inbuf, &inlen, outbuf, &outlen, typeformbuf,
-				NULL, outputPos, inputPos, &cursorPos, in.mode);
-	} else {
-		funcStatus = lou_backTranslate(tableList, inbuf, &inlen, outbuf, &outlen,
-				typeformbuf, NULL, outputPos, inputPos, &cursorPos, in.mode);
+	for (int k = 0; k < 3; k++) {
+		if (in.direction == 0) {
+			funcStatus = lou_translate(tableList, inbuf, &actualLength, outbuf, &outlen,
+					typeformbuf, NULL, outputPos, inputPos, &cursorPos, in.mode);
+		} else {
+			funcStatus = lou_backTranslate(tableList, inbuf, &actualLength, outbuf,
+					&outlen, typeformbuf, NULL, outputPos, inputPos, &cursorPos, in.mode);
+		}
+		if (!funcStatus) {
+			fprintf(stderr, "Translation failed.\n");
+			retval = 1;
+			goto fail;
+		}
+		if (inputLength == actualLength) {
+			break;
+		} else {
+			// Hm, something is not quite right. Try again with a larger outbuf
+			free(outbuf);
+			int old_outlen = inputLength * outlen_multiplier * k;
+			int new_outlen = inputLength * outlen_multiplier * (k+1);
+			outbuf = malloc(sizeof(widechar) * new_outlen);
+			fprintf(stderr,
+					"Warning: For %s: inputLength (%d) differs from actualLength (%d) "
+					"using outbuf of size %d. Trying again with bigger outbuf (%d).\n",
+					input, inputLength, actualLength, old_outlen, new_outlen);
+			actualLength = inputLength;
+		}
 	}
-	if (!funcStatus) {
-		fprintf(stderr, "Translation failed.\n");
-		retval = 1;
-		goto fail;
-	}
-
 	expectedlen = _lou_extParseChars(expected, expectedbuf);
 	for (i = 0; i < outlen && i < expectedlen && expectedbuf[i] == outbuf[i]; i++)
 		;
@@ -126,7 +143,7 @@ check_base(const char *tableList, const char *input, const char *expected,
 			/* Print the original typeform not the typeformbuf, as the
 			 * latter has been modified by the translation and contains some
 			 * information about outbuf */
-			if (in.typeform != NULL) print_typeform(in.typeform, inlen);
+			if (in.typeform != NULL) print_typeform(in.typeform, actualLength);
 			if (in.cursorPos >= 0) fprintf(stderr, "Cursor:   %d\n", in.cursorPos);
 			fprintf(stderr, "Expected: '%s' (length %d)\n", expected, expectedlen);
 			fprintf(stderr, "Received: '");
@@ -181,7 +198,7 @@ check_base(const char *tableList, const char *input, const char *expected,
 
 	if (in.expected_outputPos) {
 		int error_printed = 0;
-		for (i = 0; i < inlen; i++) {
+		for (i = 0; i < actualLength; i++) {
 			if (in.expected_outputPos[i] != outputPos[i]) {
 				if (!error_printed) {  // Print only once
 					fprintf(stderr, "Output position failure:\n");
@@ -198,6 +215,13 @@ check_base(const char *tableList, const char *input, const char *expected,
 		fprintf(stderr, "Cursor position failure:\n");
 		fprintf(stderr, "Initial:%d Expected:%d Actual:%d \n", in.cursorPos,
 				in.expected_cursorPos, cursorPos);
+		retval = 1;
+	}
+
+	if (inputLength != actualLength) {
+		fprintf(stderr,
+				"Input length is not the same before as after the translation:\n");
+		fprintf(stderr, "Before: %d After: %d \n", inputLength, actualLength);
 		retval = 1;
 	}
 
